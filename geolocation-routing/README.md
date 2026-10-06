@@ -28,7 +28,7 @@ Route 53 returns the regional Dashboard Application Load Balancer (ALB) address 
 
 ## 🏗️ Architecture
 
-![AWS Geolocation Routing Architecture](./architecture/aws-geolocation-routing-architecture.png)
+![AWS Geolocation Routing Architecture](./geolocation-routing-architecture.png)
 
 ### DNS Resolution
 
@@ -483,7 +483,7 @@ Validation:       DNS Validation
 
 Create the ACM-provided DNS validation CNAME in the authoritative hosted zone. Once the certificate status is `Issued`, attach it to the Tokyo Dashboard ALB HTTPS listener.
 
-![Tokyo ACM Certificate](./screenshots/certificate/tokyo-acm-certificate.png)
+![Tokyo ACM Certificate](./screenshots/tokyo-acm-certificate.png)
 
 ### 17. Singapore ACM Certificate
 
@@ -496,7 +496,7 @@ Validation:       DNS Validation
 
 Validate the certificate using the ACM-provided DNS record. Once its status is `Issued`, attach it to the Singapore Dashboard ALB HTTPS listener.
 
-![Singapore ACM Certificate](./screenshots/certificate/singapore-acm-certificate.png)
+![Singapore ACM Certificate](./screenshots/singapore-acm-certificate.png)
 
 ### HTTP to HTTPS Redirect
 
