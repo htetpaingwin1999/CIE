@@ -483,7 +483,7 @@ Validation:       DNS Validation
 
 Create the ACM-provided DNS validation CNAME in the authoritative hosted zone. Once the certificate status is `Issued`, attach it to the Tokyo Dashboard ALB HTTPS listener.
 
-![Tokyo ACM Certificate](./screenshots/tokyo-certificate.png)
+![Tokyo ACM Certificate](./screenshots/tokyo/tokyo-certificate.png)
 
 ### 17. Singapore ACM Certificate
 
@@ -496,7 +496,7 @@ Validation:       DNS Validation
 
 Validate the certificate using the ACM-provided DNS record. Once its status is `Issued`, attach it to the Singapore Dashboard ALB HTTPS listener.
 
-![Singapore ACM Certificate](./screenshots/singapore-certificate.png)
+![Singapore ACM Certificate](./screenshots/singapore/singapore-certificate.png)
 
 ### HTTP to HTTPS Redirect
 
@@ -509,7 +509,7 @@ Apply the same listener configuration to both Dashboard ALBs:
 
 TLS terminates at the Dashboard ALB. Traffic from the ALB to Dashboard instances uses HTTP.
 
-![HTTPS Listener](./screenshots/certificate/https-listener.png)
+![HTTPS Listener](./screenshots/tokyo/jp-dashboard-alb.png)
 
 ---
 
