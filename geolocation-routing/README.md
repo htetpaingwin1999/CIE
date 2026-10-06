@@ -28,7 +28,7 @@ Route 53 returns the regional Dashboard Application Load Balancer (ALB) address 
 
 ## 🏗️ Architecture
 
-![AWS Geolocation Routing Architecture](./geolocation-routing-architecture.png)
+![AWS Geolocation Routing Architecture](./screenshots/geolocation-routing-architecture.png)
 
 ### DNS Resolution
 
@@ -483,7 +483,7 @@ Validation:       DNS Validation
 
 Create the ACM-provided DNS validation CNAME in the authoritative hosted zone. Once the certificate status is `Issued`, attach it to the Tokyo Dashboard ALB HTTPS listener.
 
-![Tokyo ACM Certificate](./screenshots/tokyo-acm-certificate.png)
+![Tokyo ACM Certificate](./screenshots/tokyo-certificate.png)
 
 ### 17. Singapore ACM Certificate
 
@@ -496,7 +496,7 @@ Validation:       DNS Validation
 
 Validate the certificate using the ACM-provided DNS record. Once its status is `Issued`, attach it to the Singapore Dashboard ALB HTTPS listener.
 
-![Singapore ACM Certificate](./screenshots/singapore-acm-certificate.png)
+![Singapore ACM Certificate](./screenshots/singapore-certificate.png)
 
 ### HTTP to HTTPS Redirect
 
@@ -633,7 +633,7 @@ The paths below match the image references in this README. Add the corresponding
 
 ```text
 README.md
-architecture/aws-geolocation-routing-architecture.png
+screenshots/geolocation-routing-architecture.png
 screenshots/tokyo/jp-vpc.png
 screenshots/tokyo/jp-subnets.png
 screenshots/tokyo/jp-route-table.png
@@ -659,8 +659,8 @@ screenshots/tokyo/jp-dashboard-target-group.png
 screenshots/tokyo/jp-dashboard-alb.png
 screenshots/tokyo/jp-dashboard-alb-resource-map.png
 screenshots/tokyo/jp-dashboard-test.png
-screenshots/certificate/tokyo-acm-certificate.png
-screenshots/certificate/singapore-acm-certificate.png
+screenshots/tokyo-certificate.png
+screenshots/singapore--certificate.png
 screenshots/certificate/https-listener.png
 screenshots/route53/route53-hosted-zone.png
 screenshots/route53/geolocation-record.png
