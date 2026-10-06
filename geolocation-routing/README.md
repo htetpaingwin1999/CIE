@@ -2,97 +2,65 @@
 
 ## 📌 Overview
 
-This project demonstrates how to use **Amazon Route 53 Geolocation Routing** to direct users to different AWS regions based on their geographic location.
+This project demonstrates Amazon Route 53 Geolocation Routing using Dashboard and Counting services deployed in two AWS regions:
 
-The application is deployed in two AWS regions:
+- 🇯🇵 Tokyo — `ap-northeast-1`
+- 🇸🇬 Singapore — `ap-southeast-1`
 
-- 🇯🇵 **Tokyo Region** — `ap-northeast-1`
-- 🇸🇬 **Singapore Region** — `ap-southeast-1`
-
-Both environments are accessed using the same domain:
+Both environments use the same domain:
 
 ```text
 https://dashboard.htetpaingwincloudlab.xyz
 ```
 
-Route 53 determines the geographic location of the DNS request and routes users to the corresponding regional Application Load Balancer.
+Route 53 returns the regional Dashboard Application Load Balancer (ALB) address based on the geographic location associated with the DNS query. The browser then connects to that ALB over HTTPS.
 
----
+> Route 53 estimates location using the DNS resolver's IP address or the EDNS client subnet when supported. VPN location alone does not guarantee the DNS query uses the same location.
 
 ## 🎯 Routing Result
 
-| User Location | Route 53 Destination | Application |
+| DNS Query Location | Destination | Application |
 |---|---|---|
 | 🇯🇵 Japan | Tokyo Dashboard ALB | Dashboard From Tokyo |
 | 🇸🇬 Singapore | Singapore Dashboard ALB | Dashboard From Singapore |
 
 ---
 
-# 🏗️ Architecture
+## 🏗️ Architecture
 
 ![AWS Geolocation Routing Architecture](./architecture/aws-geolocation-routing-architecture.png)
 
-### Traffic Flow
+### DNS Resolution
 
-```text
-                         User
-                          │
-                          ▼
-        dashboard.htetpaingwincloudlab.xyz
-                          │
-                          ▼
-                   Amazon Route 53
-                Geolocation Routing
-                   /             \
-                  /               \
-             🇯🇵 Japan          🇸🇬 Singapore
-                │                    │
-                ▼                    ▼
-        Tokyo Dashboard ALB   Singapore Dashboard ALB
-             HTTPS 443              HTTPS 443
-                │                    │
-                ▼                    ▼
-        Dashboard EC2 :8888   Dashboard EC2 :8888
-                │                    │
-                ▼                    ▼
-        Internal Counting ALB Internal Counting ALB
-              HTTP 80               HTTP 80
-                │                    │
-                ▼                    ▼
-        Counting EC2 :9902    Counting EC2 :9902
-```
+The client resolves `dashboard.htetpaingwincloudlab.xyz` through Route 53 Geolocation Routing, which selects the Tokyo or Singapore Dashboard ALB.
+
+### Application Traffic
+
+| Layer | Tokyo | Singapore |
+|---|---|---|
+| Public entry point | Dashboard ALB: HTTPS `443` | Dashboard ALB: HTTPS `443` |
+| Dashboard application | Private EC2: HTTP `8888` | Private EC2: HTTP `8888` |
+| Internal entry point | Counting ALB: HTTP `80` | Counting ALB: HTTP `80` |
+| Counting application | Private EC2: HTTP `9902` | Private EC2: HTTP `9902` |
+
+Each regional Dashboard application sends requests to its regional internal Counting ALB. HTTP requests to the public Dashboard ALB on port `80` redirect to HTTPS on port `443`.
+
+## 🌐 Regional Configuration
+
+| Setting | Tokyo | Singapore |
+|---|---|---|
+| Region | `ap-northeast-1` | `ap-southeast-1` |
+| Availability Zones | `ap-northeast-1a`, `ap-northeast-1c` | `ap-southeast-1a`, `ap-southeast-1c` |
+| Dashboard ALB | Internet-facing | Internet-facing |
+| Counting ALB | Internal | Internal |
+| Dashboard port | `8888` | `8888` |
+| Counting port | `9902` | `9902` |
 
 ---
 
-# 🌐 Infrastructure Setup
+## 🇯🇵 Tokyo Region Setup
 
-## 🇯🇵 Tokyo Region
-
-```text
-Region:              ap-northeast-1
-Availability Zones:  ap-northeast-1a, ap-northeast-1c
-Dashboard ALB:       Internet-facing
-Counting ALB:        Internal
-Dashboard Port:      8888
-Counting Port:       9902
-```
-
-## 🇸🇬 Singapore Region
-
-```text
-Region:              ap-southeast-1
-Availability Zones:  ap-southeast-1a, ap-southeast-1c
-Dashboard ALB:       Internet-facing
-Counting ALB:        Internal
-Dashboard Port:      8888
-Counting Port:       9902
-```
-
----
-
-# 🇯🇵 Tokyo Region Setup
-
-## 1. Network Resources
+### 1. Network Resources
 
 | Resource | Name |
 |---|---|
@@ -104,72 +72,57 @@ Counting Port:       9902
 | Internet Gateway | `JP-IGW` |
 | Public Route Table | `JP-Public-RT` |
 | Bastion Instance | `JP-Bastion` |
-| Dashboard Instance | `JP-Dashboard-Instance` |
-| Counting Instance | `JP-Counting-Instance` |
+| Dashboard Instances | `JP-Dashboard-Instance-1a`, `JP-Dashboard-Instance-1c` |
+| Counting Instances | `JP-Counting-Instance-1a`, `JP-Counting-Instance-1c` |
 | Dashboard ALB | `JP-Dashboard-ALB` |
 | Counting ALB | `JP-Counting-ALB` |
 | Dashboard Target Group | `JP-Dashboard-Target-Group` |
 | Counting Target Group | `JP-Counting-Target-Group` |
 
-### Network Configuration
+#### Network Configuration
 
-```text
-VPC CIDR:
-10.10.0.0/16
+| Network | CIDR | Availability Zone |
+|---|---|---|
+| VPC | `10.10.0.0/16` | — |
+| `JP-Public-1a` | `10.10.1.0/24` | `ap-northeast-1a` |
+| `JP-Public-1c` | `10.10.2.0/24` | `ap-northeast-1c` |
+| `JP-Private-1a` | `10.10.11.0/24` | `ap-northeast-1a` |
+| `JP-Private-1c` | `10.10.12.0/24` | `ap-northeast-1c` |
 
-Public Subnets:
-10.10.1.0/24
-10.10.2.0/24
-
-Private Subnets:
-10.10.11.0/24
-10.10.12.0/24
-```
-
-### Public Route
+Attach `JP-IGW` to `JP-VPC`. Associate both public subnets with `JP-Public-RT` and configure:
 
 ```text
 Destination: 0.0.0.0/0
 Target:      JP-IGW
 ```
 
-### Screenshots
+Enable VPC DNS resolution. Private subnet route tables retain the VPC local route for communication between the Dashboard and Counting components.
 
 ![Tokyo VPC](./screenshots/tokyo/jp-vpc.png)
-
 ![Tokyo Subnets](./screenshots/tokyo/jp-subnets.png)
-
 ![Tokyo Route Table](./screenshots/tokyo/jp-route-table.png)
+![Tokyo Internet Gateway](./screenshots/tokyo/jp-igw.png)
 
----
-
-# 🔐 Tokyo Security Groups
-
-## 2. Bastion Security Group
+### 2. Bastion Security Group
 
 ```text
-Security Group:
-JP-Bastion-SG
+Security Group: JP-Bastion-SG
 
 Inbound:
-SSH 22 <- My IP
+SSH 22 <- My IP /32
 
 Outbound:
 SSH 22 -> JP-Dashboard-Instance-SG
 SSH 22 -> JP-Counting-Instance-SG
 ```
 
-![Tokyo Bastion Security Group]
-(./screenshots/tokyo/jp-bastion-sg-inbound.png)
-(./screenshots/tokyo/jp-bastion-sg-outbound.png)
+![Tokyo Bastion SG Inbound](./screenshots/tokyo/jp-bastion-sg-inbound.png)
+![Tokyo Bastion SG Outbound](./screenshots/tokyo/jp-bastion-sg-outbound.png)
 
----
-
-## 3. Dashboard ALB Security Group
+### 3. Dashboard ALB Security Group
 
 ```text
-Security Group:
-JP-Dashboard-ALB-SG
+Security Group: JP-Dashboard-ALB-SG
 
 Inbound:
 HTTP 80   <- 0.0.0.0/0
@@ -179,17 +132,13 @@ Outbound:
 TCP 8888 -> JP-Dashboard-Instance-SG
 ```
 
-![Tokyo Dashboard ALB Security Group]
-(./screenshots/tokyo/jp-dashboard-alb-sg-inbound.png)
-(./screenshots/tokyo/jp-dashboard-alb-sg-outbound.png)
+![Tokyo Dashboard ALB SG Inbound](./screenshots/tokyo/jp-dashboard-alb-sg-inbound.png)
+![Tokyo Dashboard ALB SG Outbound](./screenshots/tokyo/jp-dashboard-alb-sg-outbound.png)
 
----
-
-## 4. Dashboard Instance Security Group
+### 4. Dashboard Instance Security Group
 
 ```text
-Security Group:
-JP-Dashboard-Instance-SG
+Security Group: JP-Dashboard-Instance-SG
 
 Inbound:
 TCP 8888 <- JP-Dashboard-ALB-SG
@@ -199,17 +148,13 @@ Outbound:
 HTTP 80 -> JP-Counting-ALB-SG
 ```
 
-![Tokyo Dashboard Instance Security Group]
-(./screenshots/tokyo/jp-dashboard-instance-sg-inbound.png)
-(./screenshots/tokyo/jp-dashboard-instance-sg-outbound.png)
+![Tokyo Dashboard Instance SG Inbound](./screenshots/tokyo/jp-dashboard-instance-sg-inbound.png)
+![Tokyo Dashboard Instance SG Outbound](./screenshots/tokyo/jp-dashboard-instance-sg-outbound.png)
 
----
-
-## 5. Counting ALB Security Group
+### 5. Counting ALB Security Group
 
 ```text
-Security Group:
-JP-Counting-ALB-SG
+Security Group: JP-Counting-ALB-SG
 
 Inbound:
 HTTP 80 <- JP-Dashboard-Instance-SG
@@ -218,17 +163,13 @@ Outbound:
 TCP 9902 -> JP-Counting-Instance-SG
 ```
 
-![Tokyo Counting ALB Security Group]
-(./screenshots/tokyo/jp-counting-alb-sg-inbound.png)
-(./screenshots/tokyo/jp-counting-alb-sg-outbound.png)
+![Tokyo Counting ALB SG Inbound](./screenshots/tokyo/jp-counting-alb-sg-inbound.png)
+![Tokyo Counting ALB SG Outbound](./screenshots/tokyo/jp-counting-alb-sg-outbound.png)
 
----
-
-## 6. Counting Instance Security Group
+### 6. Counting Instance Security Group
 
 ```text
-Security Group:
-JP-Counting-Instance-SG
+Security Group: JP-Counting-Instance-SG
 
 Inbound:
 TCP 9902 <- JP-Counting-ALB-SG
@@ -238,86 +179,63 @@ Outbound:
 All Traffic -> 0.0.0.0/0
 ```
 
-![Tokyo Counting Instance Security Group]
-(./screenshots/tokyo/jp-counting-instance-sg-inbound.png)
-(./screenshots/tokyo/jp-counting-instance-sg-outbound.png)
+An outbound security group rule does not itself provide internet connectivity to a private subnet.
 
----
-## 7. Counting Instance Setup
+![Tokyo Counting Instance SG Inbound](./screenshots/tokyo/jp-counting-instance-sg-inbound.png)
+![Tokyo Counting Instance SG Outbound](./screenshots/tokyo/jp-counting-instance-sg-outbound.png)
 
-Create the Counting EC2 instance in the Tokyo private subnet.
+### 7. Counting Instance Setup
 
-### Instance Configuration
+Create two Counting EC2 instances with no public IP address:
 
-```text
-Instance Name:
-JP-Counting-Instance
+| Instance | Subnet | Security Group | Application Port |
+|---|---|---|---|
+| `JP-Counting-Instance-1a` | `JP-Private-1a` | `JP-Counting-Instance-SG` | `9902` |
+| `JP-Counting-Instance-1c` | `JP-Private-1c` | `JP-Counting-Instance-SG` | `9902` |
 
-Region:
-ap-northeast-1
+The deployment commands below assume Ubuntu and x86_64 instances.
 
-VPC:
-JP-VPC
+![Tokyo Counting Instance 1a](./screenshots/tokyo/jp-counting-instance-1a.png)
+![Tokyo Counting Instance 1c](./screenshots/tokyo/jp-counting-instance-1c.png)
 
-Subnet:
-JP-Private-1a
+### 8. Counting Service Deployment
 
-Public IP:
-Disabled
-
-Security Group:
-JP-Counting-Instance-SG
-
-Application Port:
-9902
-```
-
-![Tokyo Counting Instance]
-(./screenshots/tokyo/jp-counting-instance-1a.png)
-(./screenshots/tokyo/jp-counting-instance-1c.png)
-
----
-
-## 8. Counting Service Deployment
-
-### Build the Linux Binary
+Run the build command from the Counting service source directory on your local machine:
 
 ```bash
-GOOS=linux GOARCH=amd64 go build -o counting-service-linux-amd64 .
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o counting-service-linux-amd64 .
 ```
 
-### Local → Bastion
+#### Local → Bastion → Counting Instance
+
+Copy the binary directly through the bastion using SSH ProxyCommand. Replace all placeholders with your actual values. Keep the private key on your local machine.
 
 ```bash
 scp -i <key.pem> \
-counting-service-linux-amd64 \
-ubuntu@<JP_BASTION_PUBLIC_IP>:/home/ubuntu/
+  -o 'ProxyCommand=ssh -i <key.pem> -W %h:%p ubuntu@<JP_BASTION_PUBLIC_IP>' \
+  counting-service-linux-amd64 \
+  ubuntu@<JP_COUNTING_PRIVATE_IP>:/home/ubuntu/
 ```
 
-### Bastion → Counting Instance
+Connect to the Counting instance through the bastion:
 
 ```bash
-scp -i <key.pem> \
-counting-service-linux-amd64 \
-ubuntu@<JP_COUNTING_PRIVATE_IP>:/home/ubuntu/
+ssh -i <key.pem> \
+  -o 'ProxyCommand=ssh -i <key.pem> -W %h:%p ubuntu@<JP_BASTION_PUBLIC_IP>' \
+  ubuntu@<JP_COUNTING_PRIVATE_IP>
 ```
 
-### Prepare Application Directory
+#### Prepare the Application Directory
+
+Run on each Counting instance:
 
 ```bash
 sudo mkdir -p /opt/counting-service
-```
-
-```bash
-sudo mv /home/ubuntu/counting-service-linux-amd64 \
-/opt/counting-service/counting-service
-```
-
-```bash
+sudo mv /home/ubuntu/counting-service-linux-amd64 /opt/counting-service/counting-service
 sudo chmod +x /opt/counting-service/counting-service
 ```
 
-### Create systemd Service
+#### Create the systemd Service
 
 ```bash
 sudo nano /etc/systemd/system/counting-service.service
@@ -333,11 +251,8 @@ Type=simple
 User=ubuntu
 Group=ubuntu
 WorkingDirectory=/opt/counting-service
-
 Environment=PORT=9902
-
 ExecStart=/opt/counting-service/counting-service
-
 Restart=always
 RestartSec=5
 
@@ -345,192 +260,101 @@ RestartSec=5
 WantedBy=multi-user.target
 ```
 
-### Start the Counting Service
+The application must read `PORT` and listen on the instance's network interface, such as `0.0.0.0:9902`.
+
+#### Start the Service
 
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl enable counting-service
-sudo systemctl start counting-service
+sudo systemctl enable --now counting-service
 sudo systemctl status counting-service
 ```
 
----
+Repeat deployment for both Counting instances.
 
-## 9. Counting Target Group
-
-Create a target group for the Counting service.
+### 9. Counting Target Group
 
 ```text
-Target Type:
-Instances
-
-Protocol:
-HTTP
-
-Port:
-9902
-
-VPC:
-JP-VPC
-
-Health Check Protocol:
-HTTP
-
-Health Check Path:
-/
+Name:                  JP-Counting-Target-Group
+Target Type:           Instances
+Protocol:              HTTP
+Port:                  9902
+VPC:                   JP-VPC
+Health Check Protocol: HTTP
+Health Check Path:     /
 ```
 
-Register:
+Register `JP-Counting-Instance-1a` and `JP-Counting-Instance-1c` on port `9902`. The health check path must return a successful response from the application.
+
+After the target group is attached to the ALB in the next step, verify both targets become `Healthy`.
+
+![Tokyo Counting Target Group](./screenshots/tokyo/jp-counting-target-group.png)
+
+### 10. Counting Internal Application Load Balancer
 
 ```text
-JP-Counting-Instance-1a & JP-Counting-Instance-1c
+Name:            JP-Counting-ALB
+Scheme:          Internal
+IP Address Type: IPv4
+VPC:             JP-VPC
+Subnets:         JP-Private-1a, JP-Private-1c
+Security Group:  JP-Counting-ALB-SG
+
+Listener:
+HTTP :80 -> JP-Counting-Target-Group :9902
 ```
 
-The target should become:
+Save the internal ALB DNS name for the Dashboard service configuration.
 
-```text
-Healthy
-```
+![Tokyo Counting ALB](./screenshots/tokyo/jp-counting-alb.png)
+![Tokyo Counting ALB Resource Map](./screenshots/tokyo/jp-counting-alb-resource-map.png)
 
-![Tokyo Counting Target Group]
-(./screenshots/tokyo/jp-counting-target-group.png)
+### 11. Dashboard Instance Setup
 
----
+Create two Dashboard EC2 instances with no public IP address:
 
-## 10. Counting Internal Application Load Balancer
+| Instance | Subnet | Security Group | Application Port |
+|---|---|---|---|
+| `JP-Dashboard-Instance-1a` | `JP-Private-1a` | `JP-Dashboard-Instance-SG` | `8888` |
+| `JP-Dashboard-Instance-1c` | `JP-Private-1c` | `JP-Dashboard-Instance-SG` | `8888` |
 
-Create an internal Application Load Balancer for the Counting service.
+![Tokyo Dashboard Instance 1a](./screenshots/tokyo/jp-dashboard-instance-1a.png)
+![Tokyo Dashboard Instance 1c](./screenshots/tokyo/jp-dashboard-instance-1c.png)
 
-```text
-Name:
-JP-Counting-Internal-ALB
+### 12. Dashboard Service Deployment
 
-Scheme:
-Internal
-
-IP Address Type:
-IPv4
-
-VPC:
-JP-VPC
-
-Subnets:
-JP-Private-1a
-JP-Private-1c
-
-Security Group:
-JP-Counting-ALB-SG
-```
-
-### Listener
-
-```text
-Protocol:
-HTTP
-
-Port:
-80
-
-Default Action:
-Forward to JP-Counting-Target-Group
-```
-
-Traffic flow:
-
-```text
-Dashboard Instance
-        |
-        | HTTP : 80
-        v
-JP-Counting-ALB
-        |
-        | TCP : 9902
-        v
-JP-Counting-Instance
-```
-
-![Tokyo Counting ALB]
-(./screenshots/tokyo/jp-counting-alb.png)
-
-![Tokyo Counting ALB Listener]
-(./screenshots/tokyo/jp-counting-alb-resource-map.png)
-
----
-
-## 11. Dashboard Instance Setup
-
-Create the Dashboard EC2 instance in the Tokyo private subnet.
-
-### Instance Configuration
-
-```text
-Instance Name:
-JP-Dashboard-Instance
-
-Region:
-ap-northeast-1
-
-VPC:
-JP-VPC
-
-Subnet:
-JP-Private-1a
-
-Public IP:
-Disabled
-
-Security Group:
-JP-Dashboard-Instance-SG
-
-Application Port:
-8888
-```
-
-![Tokyo Dashboard Instance]
-(./screenshots/tokyo/jp-dashboard-instance-1a.png)
-(./screenshots/tokyo/jp-dashboard-instance-1b.png)
----
-
-## 12. Dashboard Service Deployment
-
-### Build the Linux Binary
+Run from the Dashboard service source directory on your local machine:
 
 ```bash
-GOOS=linux GOARCH=amd64 go build -o dashboard-service-linux-amd64 .
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o dashboard-service-linux-amd64 .
 ```
 
-### Local → Bastion
+#### Local → Bastion → Dashboard Instance
 
 ```bash
 scp -i <key.pem> \
-dashboard-service-linux-amd64 \
-ubuntu@<JP_BASTION_PUBLIC_IP>:/home/ubuntu/
+  -o 'ProxyCommand=ssh -i <key.pem> -W %h:%p ubuntu@<JP_BASTION_PUBLIC_IP>' \
+  dashboard-service-linux-amd64 \
+  ubuntu@<JP_DASHBOARD_PRIVATE_IP>:/home/ubuntu/
 ```
-
-### Bastion → Dashboard Instance
 
 ```bash
-scp -i <key.pem> \
-dashboard-service-linux-amd64 \
-ubuntu@<JP_DASHBOARD_PRIVATE_IP>:/home/ubuntu/
+ssh -i <key.pem> \
+  -o 'ProxyCommand=ssh -i <key.pem> -W %h:%p ubuntu@<JP_BASTION_PUBLIC_IP>' \
+  ubuntu@<JP_DASHBOARD_PRIVATE_IP>
 ```
 
-### Prepare Application Directory
+#### Prepare the Application Directory
+
+Run on each Dashboard instance:
 
 ```bash
 sudo mkdir -p /opt/dashboard-service
-```
-
-```bash
-sudo mv /home/ubuntu/dashboard-service-linux-amd64 \
-/opt/dashboard-service/dashboard-service
-```
-
-```bash
+sudo mv /home/ubuntu/dashboard-service-linux-amd64 /opt/dashboard-service/dashboard-service
 sudo chmod +x /opt/dashboard-service/dashboard-service
 ```
 
-### Create systemd Service
+#### Create the systemd Service
 
 ```bash
 sudo nano /etc/systemd/system/dashboard-service.service
@@ -546,12 +370,9 @@ Type=simple
 User=ubuntu
 Group=ubuntu
 WorkingDirectory=/opt/dashboard-service
-
 Environment=PORT=8888
 Environment=COUNTING_SERVICE_URL=http://<JP_COUNTING_INTERNAL_ALB_DNS>/
-
 ExecStart=/opt/dashboard-service/dashboard-service
-
 Restart=always
 RestartSec=5
 
@@ -559,297 +380,153 @@ RestartSec=5
 WantedBy=multi-user.target
 ```
 
-Replace:
-
-```text
-<JP_COUNTING_INTERNAL_ALB_DNS>
-```
-
-with the DNS name of `JP-Counting-ALB`.
+Replace `<JP_COUNTING_INTERNAL_ALB_DNS>` with the DNS name of `JP-Counting-ALB`.
 
 Example:
 
-```text
+```ini
 Environment=COUNTING_SERVICE_URL=http://internal-jp-counting-alb-xxxxxxxx.ap-northeast-1.elb.amazonaws.com/
 ```
 
-### Start the Dashboard Service
+The application must read these environment variables and listen on the instance's network interface, such as `0.0.0.0:8888`. Configure the regional page label as `Dashboard From Tokyo` using the application's supported configuration or source code.
+
+#### Start the Service
 
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl enable dashboard-service
-sudo systemctl start dashboard-service
+sudo systemctl enable --now dashboard-service
 sudo systemctl status dashboard-service
 ```
 
----
+Repeat deployment for both Dashboard instances.
 
-## 13. Dashboard Target Group
-
-Create a target group for the Dashboard service.
+### 13. Dashboard Target Group
 
 ```text
-Target Type:
-Instances
-
-Protocol:
-HTTP
-
-Port:
-8888
-
-VPC:
-JP-VPC
-
-Health Check Protocol:
-HTTP
-
-Health Check Path:
-/
+Name:                  JP-Dashboard-Target-Group
+Target Type:           Instances
+Protocol:              HTTP
+Port:                  8888
+VPC:                   JP-VPC
+Health Check Protocol: HTTP
+Health Check Path:     /
 ```
 
-Register:
+Register `JP-Dashboard-Instance-1a` and `JP-Dashboard-Instance-1c` on port `8888`.
+
+After attaching the target group to the ALB, verify both targets become `Healthy`.
+
+![Tokyo Dashboard Target Group](./screenshots/tokyo/jp-dashboard-target-group.png)
+
+### 14. Dashboard Internet-Facing Application Load Balancer
 
 ```text
-JP-Dashboard-Instance-1a & JP-Dashboard-Instance-1c
+Name:            JP-Dashboard-ALB
+Scheme:          Internet-facing
+IP Address Type: IPv4
+VPC:             JP-VPC
+Subnets:         JP-Public-1a, JP-Public-1c
+Security Group:  JP-Dashboard-ALB-SG
 ```
 
-The target should become:
+Final listener configuration:
+
+| Listener | Action |
+|---|---|
+| HTTP `80` | Redirect to HTTPS `443` using HTTP `301` |
+| HTTPS `443` | Forward to `JP-Dashboard-Target-Group` on HTTP `8888` |
+
+Attach the Tokyo ACM certificate described in step 16 to the HTTPS listener. HTTPS setup is completed after certificate validation.
 
 ```text
-Healthy
+Redirect protocol: HTTPS
+Redirect host:     #{host}
+Redirect port:     443
+Redirect path:     /#{path}
+Redirect query:    #{query}
+Status code:       HTTP_301
 ```
 
-![Tokyo Dashboard Target Group]
-(./screenshots/tokyo/jp-dashboard-target-group.png)
+![Tokyo Dashboard ALB](./screenshots/tokyo/jp-dashboard-alb.png)
+![Tokyo Dashboard ALB Resource Map](./screenshots/tokyo/jp-dashboard-alb-resource-map.png)
 
+### 15. Verify Service Status
 
-
----
-
-## 14. Dashboard Internet-Facing Application Load Balancer
-
-Create the public Application Load Balancer for the Dashboard application.
-
-```text
-Name:
-JP-Dashboard-ALB
-
-Scheme:
-Internet-facing
-
-IP Address Type:
-IPv4
-
-VPC:
-JP-VPC
-
-Subnets:
-JP-Public-1a
-JP-Public-1c
-
-Security Group:
-JP-Dashboard-ALB-SG
-```
-
-### HTTP Listener
-
-```text
-Protocol:
-HTTPs
-
-Port:
-443
-
-Default Action:
-Forward to JP-Dashboard-Target-Group
-
-Protocol:
-HTTP
-
-Port:
-80
-
-Redirect to HTTPS://#{host}:443/#{path}?#{query}
-```
-
-At this stage, the traffic flow is:
-
-```text
-Internet
-   |
-   | HTTP : 80
-   v
-JP-Dashboard-ALB
-   |
-   | TCP : 8888
-   v
-JP-Dashboard-Instance
-   |
-   | HTTP : 80
-   v
-JP-Counting-ALB
-   |
-   | TCP : 9902
-   v
-JP-Counting-Instance
-```
-
-![Tokyo Dashboard ALB]
-(./screenshots/tokyo/jp-dashboard-alb.png)
-
-![Tokyo Dashboard ALB Listener](./screenshots/tokyo/jp-dashboard-alb-resource-map.png)
-
----
-
-## 15. Verify Service Status
+Verify both systemd services are active, both target groups have healthy targets, and the Dashboard can reach the internal Counting ALB. After ACM and Route 53 configuration, verify the Dashboard through the project domain.
 
 ![Tokyo Dashboard Test](./screenshots/tokyo/jp-dashboard-test.png)
 
 ---
 
-# 🇸🇬 Singapore Region Setup
+## 🇸🇬 Singapore Region Setup
 
-The same VPC, EC2, Security Group, Target Group, Application Load Balancer, and service configuration as the Tokyo region was created in the Singapore region (`ap-southeast-1`).
+Create the same VPC, EC2, security group, target group, ALB, and systemd service configuration in Singapore (`ap-southeast-1`), using `SG-` resource names, Singapore Availability Zones, the Singapore Counting ALB DNS name, and the page label `Dashboard From Singapore`.
 
+---
 
-# 🔒 SSL/TLS Certificate
+## 🔒 SSL/TLS Certificates
 
-AWS Certificate Manager (ACM) is used to secure the Dashboard domain.
-
-Domain:
+AWS Certificate Manager (ACM) certificates are created separately in Tokyo and Singapore for:
 
 ```text
 dashboard.htetpaingwincloudlab.xyz
 ```
 
-Because ACM certificates are regional, certificates were created separately in Tokyo and Singapore.
-
----
-
-## 16. Tokyo ACM Certificate
+### 16. Tokyo ACM Certificate
 
 ```text
-Region:
-ap-northeast-1
-
-Domain:
-dashboard.htetpaingwincloudlab.xyz
-
-Certificate Type:
-Public Certificate
-
-Validation:
-DNS Validation
+Region:           ap-northeast-1
+Domain:           dashboard.htetpaingwincloudlab.xyz
+Certificate Type: Public Certificate
+Validation:       DNS Validation
 ```
 
-![Tokyo ACM Certificate]
-(./screenshots/tokyo/tokyo-certificate.png)
+Create the ACM-provided DNS validation CNAME in the authoritative hosted zone. Once the certificate status is `Issued`, attach it to the Tokyo Dashboard ALB HTTPS listener.
 
----
+![Tokyo ACM Certificate](./screenshots/certificate/tokyo-acm-certificate.png)
 
-## 17. Singapore ACM Certificate
+### 17. Singapore ACM Certificate
 
 ```text
-Region:
-ap-southeast-1
-
-Domain:
-dashboard.htetpaingwincloudlab.xyz
-
-Certificate Type:
-Public Certificate
-
-Validation:
-DNS Validation
+Region:           ap-southeast-1
+Domain:           dashboard.htetpaingwincloudlab.xyz
+Certificate Type: Public Certificate
+Validation:       DNS Validation
 ```
 
-![Singapore ACM Certificate]
-(./screenshots/singapore/singapore-certificate.png)
+Validate the certificate using the ACM-provided DNS record. Once its status is `Issued`, attach it to the Singapore Dashboard ALB HTTPS listener.
 
----
+![Singapore ACM Certificate](./screenshots/certificate/singapore-acm-certificate.png)
 
-# 🔁 HTTP to HTTPS Redirect
+### HTTP to HTTPS Redirect
 
-The Dashboard ALBs are configured with two listeners.
+Apply the same listener configuration to both Dashboard ALBs:
 
-```text
-HTTP : 80
-      │
-      ▼
-Redirect
-      │
-      ▼
-HTTPS : 443
-      │
-      ▼
-Dashboard Target Group : 8888
-```
+| Listener | Action | Destination |
+|---|---|---|
+| HTTP `80` | HTTP `301` redirect | HTTPS `443`, preserving host, path, and query |
+| HTTPS `443` | Forward | Regional Dashboard target group: HTTP `8888` |
 
-### HTTP Listener
-
-```text
-Protocol:
-HTTP
-
-Port:
-80
-
-Action:
-Redirect to HTTPS
-
-Redirect Port:
-443
-
-Status Code:
-HTTP 301
-```
-
-### HTTPS Listener
-
-```text
-Protocol:
-HTTPS
-
-Port:
-443
-
-Action:
-Forward to Dashboard Target Group
-```
+TLS terminates at the Dashboard ALB. Traffic from the ALB to Dashboard instances uses HTTP.
 
 ![HTTPS Listener](./screenshots/certificate/https-listener.png)
 
 ---
 
-# 🌍 Route 53 Configuration
+## 🌍 Route 53 Configuration
 
-## 18. Public Hosted Zone
-
-Hosted Zone:
+### 18. Public Hosted Zone and DNS Delegation
 
 ```text
-htetpaingwincloudlab.xyz
+Hosted Zone: htetpaingwincloudlab.xyz
+Type:        Public Hosted Zone
 ```
 
-Type:
+![Route 53 Hosted Zone](./screenshots/route53/route53-hosted-zone.png)
 
-```text
-Public Hosted Zone
-```
+The domain was registered with Namecheap. Change the domain's nameservers from Namecheap BasicDNS to the four authoritative nameservers assigned to this Route 53 hosted zone.
 
-![Route 53 Hosted Zone]
-(./screenshots/route53/route53-hosted-zone.png)
-
----
-
-# 🔗 Namecheap DNS Delegation
-
-The domain was registered using Namecheap.
-
-Namecheap nameservers were changed from Namecheap BasicDNS to the Route 53 authoritative nameservers.
-
-Example:
+Example only — use the actual values from your hosted zone:
 
 ```text
 ns-324.awsdns-40.com
@@ -858,266 +535,143 @@ ns-879.awsdns-45.net
 ns-1950.awsdns-51.co.uk
 ```
 
-Verify DNS delegation:
+Verify delegation:
 
 ```bash
 dig NS htetpaingwincloudlab.xyz
 ```
 
-Expected result:
+Confirm the returned nameservers match the four nameservers assigned by Route 53. A `NOERROR` response alone does not confirm that delegation points to the correct hosted zone.
+
+### 19. Japan Geolocation Record
+
+Replace the original Simple Routing record for the Dashboard hostname with Geolocation Routing records.
 
 ```text
-status: NOERROR
-ANSWER: 4
+Record Name:    dashboard.htetpaingwincloudlab.xyz
+Record Type:    A
+Alias:          Yes
+Routing Policy: Geolocation
+Location:       Japan
+Target:         Tokyo Dashboard ALB
+Record ID:      JP
 ```
 
+### 20. Singapore Geolocation Record
 
-# 🌏 Route 53 Geolocation Routing
+```text
+Record Name:    dashboard.htetpaingwincloudlab.xyz
+Record Type:    A
+Alias:          Yes
+Routing Policy: Geolocation
+Location:       Singapore
+Target:         Singapore Dashboard ALB
+Record ID:      SG
+```
 
-The original Simple Routing record was replaced with two Geolocation Routing records.
+![Japan and Singapore Geolocation Records](./screenshots/route53/geolocation-record.png)
+
+> This lab documents Japan and Singapore records. A Default geolocation record is recommended for other or unmapped locations. Without a matching location record or a Default record, Route 53 returns no answer. A Default record is not claimed as part of the completed lab.
 
 ---
 
-## 19. Japan Geolocation Record
+## 🧪 Geolocation Testing
+
+After changing VPN location, allow cached DNS answers to expire or clear the relevant DNS cache. Browser Secure DNS and resolver selection can affect the routing result.
+
+### 🇯🇵 Japan Test
 
 ```text
-Record Name:
-dashboard.htetpaingwincloudlab.xyz
-
-Record Type:
-A
-
-Alias:
-Yes
-
-Routing Policy:
-Geolocation
-
-Location:
-Japan
-
-Target:
-Tokyo Dashboard ALB
-
-Set ID:
-JP
+VPN Location:    Japan
+URL:             https://dashboard.htetpaingwincloudlab.xyz
+Expected Result: Dashboard From Tokyo
 ```
----
 
-## 20. Singapore Geolocation Record
+![Japan VPN](./screenshots/testing/japan-vpn.png)
+![Dashboard From Tokyo](./screenshots/testing/dashboard-from-tokyo.png)
+
+### 🇸🇬 Singapore Test
 
 ```text
-Record Name:
-dashboard.htetpaingwincloudlab.xyz
-
-Record Type:
-A
-
-Alias:
-Yes
-
-Routing Policy:
-Geolocation
-
-Location:
-Singapore
-
-Target:
-Singapore Dashboard ALB
-
-Set ID:
-SG
+VPN Location:    Singapore
+URL:             https://dashboard.htetpaingwincloudlab.xyz
+Expected Result: Dashboard From Singapore
 ```
 
-![Japan & Singapore Geolocation Record]
-(./screenshots/route53/geolocation-record.png)
+![Singapore VPN](./screenshots/testing/singapore-vpn.png)
+![Dashboard From Singapore](./screenshots/testing/dashboard-from-singapore.png)
 
----
-# 🇯🇵 Geolocation Test — Japan
+## ✅ Final Result
 
-VPN Location:
+The lab demonstrated access to two regional Dashboard environments through the same domain:
 
-```text
-Japan
-```
+| Test Location | DNS Destination | Application Request Path |
+|---|---|---|
+| Japan | Tokyo Dashboard ALB | Tokyo Dashboard ALB → Dashboard EC2 → Counting ALB → Counting EC2 |
+| Singapore | Singapore Dashboard ALB | Singapore Dashboard ALB → Dashboard EC2 → Counting ALB → Counting EC2 |
 
-URL:
+## 🏁 Project Outcome
 
-```text
-https://dashboard.htetpaingwincloudlab.xyz
-```
-
-Expected Result:
-
-```text
-Dashboard From Tokyo
-```
-
-![Japan VPN]
-(./screenshots/testing/japan-vpn.png)
-
-![Dashboard From Tokyo]
-(./screenshots/testing/dashboard-from-tokyo.png)
-
----
-
-# 🇸🇬 Geolocation Test — Singapore
-
-VPN Location:
-
-```text
-Singapore
-```
-
-URL:
-
-```text
-https://dashboard.htetpaingwincloudlab.xyz
-```
-
-Expected Result:
-
-```text
-Dashboard From Singapore
-```
-
-![Singapore VPN]
-(./screenshots/testing/singapore-vpn.png)
-
-![Dashboard From Singapore]
-(./screenshots/testing/dashboard-from-singapore.png)
-
----
-
-# ✅ Final Result
-
-The same domain successfully routes users to different AWS regions according to their geographic location.
-
-### Japan
-
-```text
-Japan User
-     ↓
-Amazon Route 53
-     ↓
-Geolocation: Japan
-     ↓
-Tokyo Dashboard ALB
-     ↓
-Tokyo Dashboard EC2
-     ↓
-Tokyo Counting ALB
-     ↓
-Tokyo Counting EC2
-```
-
-### Singapore
-
-```text
-Singapore User
-     ↓
-Amazon Route 53
-     ↓
-Geolocation: Singapore
-     ↓
-Singapore Dashboard ALB
-     ↓
-Singapore Dashboard EC2
-     ↓
-Singapore Counting ALB
-     ↓
-Singapore Counting EC2
-```
-
----
-
-# 🏁 Project Outcome
-
-The project successfully implemented:
-
-- ✅ Multi-region deployment
-- ✅ Tokyo and Singapore environments
-- ✅ Separate VPC infrastructure
-- ✅ Public Dashboard ALBs
-- ✅ Internal Counting ALBs
-- ✅ Bastion access to private instances
-- ✅ Dashboard application on port `8888`
-- ✅ Counting application on port `9902`
-- ✅ AWS Certificate Manager
-- ✅ HTTPS using port `443`
+- ✅ Multi-region deployment in Tokyo and Singapore
+- ✅ Separate regional VPC infrastructure
+- ✅ Public Dashboard ALBs and internal Counting ALBs
+- ✅ Bastion access to private EC2 instances
+- ✅ Dashboard service on port `8888`
+- ✅ Counting service on port `9902`
+- ✅ systemd service management
+- ✅ Regional ACM certificates and HTTPS on port `443`
 - ✅ HTTP to HTTPS redirection
-- ✅ Route 53 Public Hosted Zone
-- ✅ Namecheap DNS delegation
-- ✅ Route 53 Geolocation Routing
-- ✅ Japan → Tokyo routing
-- ✅ Singapore → Singapore routing
-- ✅ VPN-based geolocation testing
+- ✅ Route 53 public hosted zone and Namecheap DNS delegation
+- ✅ Geolocation Routing: Japan → Tokyo, Singapore → Singapore
+- ✅ VPN-based routing tests
 
 ---
 
 ## 📁 Repository Structure
 
+The paths below match the image references in this README. Add the corresponding screenshot files using these exact names.
+
 ```text
-geolocation-routing/
-│
-├── README.md
-│
-├── architecture/
-│   └── aws-geolocation-routing-architecture.png
-│
-└── screenshots/
-    │
-    ├── tokyo/
-    │   ├── jp-vpc.png
-    │   ├── jp-subnets.png
-    │   ├── jp-route-table.png
-    │   ├── jp-bastion-sg.png
-    │   ├── jp-dashboard-alb-sg.png
-    │   ├── jp-dashboard-instance-sg.png
-    │   ├── jp-counting-alb-sg.png
-    │   ├── jp-counting-instance-sg.png
-    │   ├── jp-ec2-instances.png
-    │   ├── jp-dashboard-service.png
-    │   ├── jp-counting-service.png
-    │   ├── jp-dashboard-alb.png
-    │   ├── jp-dashboard-target-group.png
-    │   ├── jp-counting-alb.png
-    │   ├── jp-counting-target-group.png
-    │   └── jp-dashboard-test.png
-    │
-    ├── singapore/
-    │   ├── sg-vpc.png
-    │   ├── sg-subnets.png
-    │   ├── sg-ec2-instances.png
-    │   ├── sg-bastion-sg.png
-    │   ├── sg-dashboard-alb-sg.png
-    │   ├── sg-dashboard-instance-sg.png
-    │   ├── sg-counting-alb-sg.png
-    │   ├── sg-counting-instance-sg.png
-    │   ├── sg-dashboard-service.png
-    │   ├── sg-counting-service.png
-    │   ├── sg-dashboard-alb.png
-    │   ├── sg-dashboard-target-group.png
-    │   ├── sg-counting-alb.png
-    │   ├── sg-counting-target-group.png
-    │   └── sg-dashboard-test.png
-    │
-    ├── certificate/
-    │   ├── tokyo-acm-certificate.png
-    │   ├── singapore-acm-certificate.png
-    │   └── https-listener.png
-    │
-    ├── route53/
-    │   ├── route53-hosted-zone.png
-    │   ├── namecheap-custom-dns.png
-    │   ├── dns-delegation-test.png
-    │   ├── japan-geolocation-record.png
-    │   └── singapore-geolocation-record.png
-    │
-    └── testing/
-        ├── dns-test.png
-        ├── japan-vpn.png
-        ├── dashboard-from-tokyo.png
-        ├── singapore-vpn.png
-        └── dashboard-from-singapore.png
+README.md
+architecture/aws-geolocation-routing-architecture.png
+screenshots/tokyo/jp-vpc.png
+screenshots/tokyo/jp-subnets.png
+screenshots/tokyo/jp-route-table.png
+screenshots/tokyo/jp-igw.png
+screenshots/tokyo/jp-bastion-sg-inbound.png
+screenshots/tokyo/jp-bastion-sg-outbound.png
+screenshots/tokyo/jp-dashboard-alb-sg-inbound.png
+screenshots/tokyo/jp-dashboard-alb-sg-outbound.png
+screenshots/tokyo/jp-dashboard-instance-sg-inbound.png
+screenshots/tokyo/jp-dashboard-instance-sg-outbound.png
+screenshots/tokyo/jp-counting-alb-sg-inbound.png
+screenshots/tokyo/jp-counting-alb-sg-outbound.png
+screenshots/tokyo/jp-counting-instance-sg-inbound.png
+screenshots/tokyo/jp-counting-instance-sg-outbound.png
+screenshots/tokyo/jp-counting-instance-1a.png
+screenshots/tokyo/jp-counting-instance-1c.png
+screenshots/tokyo/jp-counting-target-group.png
+screenshots/tokyo/jp-counting-alb.png
+screenshots/tokyo/jp-counting-alb-resource-map.png
+screenshots/tokyo/jp-dashboard-instance-1a.png
+screenshots/tokyo/jp-dashboard-instance-1c.png
+screenshots/tokyo/jp-dashboard-target-group.png
+screenshots/tokyo/jp-dashboard-alb.png
+screenshots/tokyo/jp-dashboard-alb-resource-map.png
+screenshots/tokyo/jp-dashboard-test.png
+screenshots/certificate/tokyo-acm-certificate.png
+screenshots/certificate/singapore-acm-certificate.png
+screenshots/certificate/https-listener.png
+screenshots/route53/route53-hosted-zone.png
+screenshots/route53/geolocation-record.png
+screenshots/testing/japan-vpn.png
+screenshots/testing/dashboard-from-tokyo.png
+screenshots/testing/singapore-vpn.png
+screenshots/testing/dashboard-from-singapore.png
 ```
+
+## 📚 References
+
+- [AWS: Geolocation Routing](https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/routing-policy-geo.html)
+- [AWS: How Route 53 uses EDNS0 to estimate user location](https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/routing-policy-edns0.html)
+
